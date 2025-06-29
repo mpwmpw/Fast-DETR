@@ -1,0 +1,46 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# Ultralytics RT-DETR-l hybrid object detection model with P3/8 - P5/32 outputs
+# Model docs: https://docs.ultralytics.com/models/rtdetr
+# Task docs: https://docs.ultralytics.com/tasks/detect
+
+# Parameters
+nc: 80 # number of classes
+scales: # model compound scaling constants, i.e. 'model=yolov8n-cls.yaml' will call yolov8-cls.yaml with scale 'n'
+  # [depth, width, max_channels]
+  l: [0.25, 0.25, 1024]
+
+backbone:
+  - [-1, 1, HGStem, [32, 48]]        # 0-P2/4
+  - [-1, 1, Conv, [128, 3, 1]]       # 新增 Conv，输出 128
+  - [-1, 2, C2f, [256]]              # stage 1，输出 256
+
+  - [-1, 1, DWConv, [128, 3, 2, 1, False]] # 2-P3/8
+  - [-1, 1, Conv, [256, 3, 1]]             # 新增 Conv，输出 256
+  - [-1, 2, C2f, [512]]                    # stage 2，输出 512
+
+
+  - [-1, 1, DWConv, [512, 3, 2, 1, False]]    # 4-P4/16
+  - [-1, 4, HGBlock, [192, 1024, 5, True, False]]  # stage 3，原 192/1024
+  - [-1, 4, HGBlock, [192, 1024, 5, True, True]]
+  - [-1, 4, HGBlock, [192, 1024, 5, True, True]]
+
+  - [-1, 1, DWConv, [1024, 3, 2, 1, False]]    # 8-P5/32
+  - [-1, 4, HGBlock, [384, 2048, 5, True, False]] # stage 4，原 384/2048
+
+head:
+  # P5 分支
+  - [-1, 1, Conv, [256, 1, 1, None, 1, 1, False]]  # 10 input_proj.1 from P5
+  - [-1, 1, AIFI, [1024, 8]]                        # 11 AIFI
+  - [-1, 1, Conv, [256, 1, 1]]                     # 12 Y5
+
+  # P5 上采样 + P4 融合
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]     # 13 upsample Y5
+  - [6, 1, Conv, [256, 1, 1, None, 1, 1, False]]   # 14 input_proj.0 from P4
+  - [[-2, -1], 1, Concat, [1]]                     # 15 concat Y5↑ + P4
+  - [-1, 2, RepC3, [256]]                          # 16 fused: F4
+  - [-1, 1, Conv, [256, 1, 1]]                     # 17 Y4
+  - [-1, 2, C2f, [512]]                            # 18 New C2f after Y4
+
+  # Detect
+  - [[18, 12], 1, RTDETRDecoder, [nc]]             # 19 Detect(Y4, Y5)
